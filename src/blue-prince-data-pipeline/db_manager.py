@@ -14,7 +14,6 @@ def initialize_db():
                     image TEXT, 
                     description TEXT,
                     gem_cost INTEGER, 
-                    type INTEGER,
                     rarity TEXT, 
                     shape TEXT)""")
     conn.execute("""CREATE TABLE IF NOT EXISTS players
@@ -60,13 +59,17 @@ def initialize_db():
     conn.close()
 
 
+# TODO: Types table id's jumps from the IGNORE so id list is non contiguous
+# Save room information to the database, including handling many-to-many relationship with types
 def save_rooms_to_db(room_info):
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
-        "INSERT OR REPLACE INTO rooms VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        """INSERT OR REPLACE INTO rooms
+           (number, title, image, description, gem_cost, rarity, shape)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
         (
-            room_info["title"],
             room_info["number"],
+            room_info["title"],
             room_info["image"],
             room_info["description"],
             room_info["gem_cost"],
@@ -74,36 +77,56 @@ def save_rooms_to_db(room_info):
             room_info["shape"],
         ),
     )
-    for room_type in room_info["type"]:
-        conn.execute(
-            "INSERT OR IGNORE INTO room_types VALUES (?, ?)",
-            (room_info["number"], room_type),
-        )
+    conn.executemany(
+        "INSERT OR IGNORE INTO types (name) VALUES (?)",
+        [(t.lower(),) for t in room_info["type"]],
+    )
+    placeholders = ", ".join("?" * len(room_info["type"]))
+    type_ids = conn.execute(
+        f"SELECT id FROM types WHERE name IN ({placeholders})",
+        [t.lower() for t in room_info["type"]],
+    ).fetchall()
+    conn.executemany(
+        "INSERT OR IGNORE INTO room_types VALUES (?, ?)",
+        [(room_info["number"], type_id[0]) for type_id in type_ids],
+    )
 
     conn.commit()
     conn.close()
 
 
-def get_from_db(title):
+def save_to_db(table, data):
     conn = sqlite3.connect(DB_PATH)
-    result = conn.execute("SELECT * FROM rooms WHERE title=?", (title,)).fetchone()
+    columns = ", ".join(data.keys())
+    placeholders = ", ".join("?" * len(data))
+    conn.execute(
+        f"INSERT OR REPLACE INTO {table} ({columns}) VALUES ({placeholders})",
+        tuple(data.values()),
+    )
+    conn.commit()
     conn.close()
-    if result:
-        result = dict(
-            zip(
-                [
-                    "title",
-                    "number",
-                    "image",
-                    "description",
-                    "gem_cost",
-                    "type",
-                    "rarity",
-                    "shape",
-                ],
-                result,
-            )
-        )
-        result["type"] = pickle.loads(result["type"])
-    print(result)
-    return result
+
+
+# def get_from_db(title):
+#     conn = sqlite3.connect(DB_PATH)
+#     result = conn.execute("SELECT * FROM rooms WHERE title=?", (title,)).fetchone()
+#     conn.close()
+#     if result:
+#         result = dict(
+#             zip(
+#                 [
+#                     "title",
+#                     "number",
+#                     "image",
+#                     "description",
+#                     "gem_cost",
+#                     "type",
+#                     "rarity",
+#                     "shape",
+#                 ],
+#                 result,
+#             )
+#         )
+#         result["type"] = pickle.loads(result["type"])
+#     print(result)
+#     return result

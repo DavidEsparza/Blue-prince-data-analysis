@@ -6,7 +6,7 @@ import re
 
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-from db_manager import initialize_db, save_rooms_to_db
+from db_manager import initialize_db, save_rooms_to_db, save_to_db
 
 BASE_URL = "https://blueprince.wiki.gg/api.php"
 
@@ -26,28 +26,6 @@ QUERY_PARAMS = {
     "format": "json",
     "cmlimit": "150",
 }
-
-
-TYPES = [
-    "Blueprint",
-    "Objective",
-    "Red Room",
-    "Green Room",
-    "Hallway",
-    "Bedroom",
-    "Shop",
-    "Blackprint",
-    "Dead End",
-    "Entry",
-    "Puzzle",
-    "Mechanical",
-    "Outer Room",
-    "Addition",
-    "Drafting",
-    "Tomorrow",
-    "Spread",
-    "Permanent",
-]
 
 
 def extract_template_block(text, template_name):
@@ -148,6 +126,7 @@ def fetch_json(base_url, params):
 
 
 def populate_rooms():
+    print("Fetching room list from Blue Prince Wiki...")
     data = fetch_json(BASE_URL, QUERY_PARAMS)
     rooms = [
         member["title"].replace(" ", "_")
@@ -158,6 +137,7 @@ def populate_rooms():
     for room in rooms:
         room_params = QUERY_PARAMS_ROOMS.copy()
         room_params["titles"] = room
+        print(f"Processing room: {room}...")
 
         room_data = fetch_json(BASE_URL, room_params)
         for page in room_data.get("query", {}).get("pages", []):

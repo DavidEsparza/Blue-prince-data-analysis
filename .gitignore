@@ -1,1 +1,5 @@
 /media
+.DS_Store
+settings.json
+.vscode
+.venv
