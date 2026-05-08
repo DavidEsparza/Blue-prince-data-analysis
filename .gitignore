@@ -3,3 +3,6 @@
 settings.json
 .vscode
 .venv
+__pycache__
+*.pyc
+*.db

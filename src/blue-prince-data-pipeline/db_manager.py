@@ -1,5 +1,4 @@
 import sqlite3
-import pickle
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parents[2] / "data" / "blue-prince-data.db"
@@ -44,6 +43,7 @@ def initialize_db():
                     outer_room INTEGER,
                     current_allowance INTEGER,
                     current_stars INTEGER,
+                    rank_reached INTEGER,
                     FOREIGN KEY(outer_room) REFERENCES rooms(number),
                     FOREIGN KEY(player) REFERENCES players(name))""")
     conn.execute("""CREATE TABLE IF NOT EXISTS mansion
@@ -99,34 +99,19 @@ def save_to_db(table, data):
     conn = sqlite3.connect(DB_PATH)
     columns = ", ".join(data.keys())
     placeholders = ", ".join("?" * len(data))
-    conn.execute(
+    cursor = conn.execute(
         f"INSERT OR REPLACE INTO {table} ({columns}) VALUES ({placeholders})",
         tuple(data.values()),
     )
+    saved_id = cursor.lastrowid
     conn.commit()
     conn.close()
+    return saved_id
 
 
-# def get_from_db(title):
-#     conn = sqlite3.connect(DB_PATH)
-#     result = conn.execute("SELECT * FROM rooms WHERE title=?", (title,)).fetchone()
-#     conn.close()
-#     if result:
-#         result = dict(
-#             zip(
-#                 [
-#                     "title",
-#                     "number",
-#                     "image",
-#                     "description",
-#                     "gem_cost",
-#                     "type",
-#                     "rarity",
-#                     "shape",
-#                 ],
-#                 result,
-#             )
-#         )
-#         result["type"] = pickle.loads(result["type"])
-#     print(result)
-#     return result
+def query_db(query, params=()):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.execute(query, params)
+    results = cursor.fetchall()
+    conn.close()
+    return results
