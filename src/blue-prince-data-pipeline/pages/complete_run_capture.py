@@ -18,7 +18,7 @@ def show_run_capture_page(save_callback=None):
     image_list = sorted(
         MEDIA_PATH.glob("NormalMode*.png"),
         key=lambda p: int(p.stem.replace("NormalMode(", "").replace(")", "")),
-    )[:2]
+    )
 
     st.session_state.image_list_names = [img.name for img in image_list]
 
