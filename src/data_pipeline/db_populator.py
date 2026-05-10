@@ -1,12 +1,11 @@
-# This script collects room data from the Blue Prince Wiki and saves it to a SQLite database.
-# Run it once to populate the data base
+"""Collect room data from the Blue Prince Wiki and store it in SQLite."""
 
 import json
 import re
 
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-from db_manager import initialize_db, save_rooms_to_db, save_to_db
+from .db_manager import initialize_db, save_rooms_to_db
 
 BASE_URL = "https://blueprince.wiki.gg/api.php"
 
@@ -29,6 +28,7 @@ QUERY_PARAMS = {
 
 
 def extract_template_block(text, template_name):
+    """Return the full template block, handling nested braces safely."""
     start_token = "{{" + template_name
     start = text.find(start_token)
     if start == -1:
@@ -89,6 +89,7 @@ def get_revision_content(page):
 
 
 def extract_room_info(page_title, wikitext):
+    """Parse a page into the room record format used by the database."""
     infobox = extract_template_block(wikitext, "RoomInfobox")
     if not infobox:
         return None
@@ -113,6 +114,7 @@ def extract_room_info(page_title, wikitext):
 
 
 def fetch_json(base_url, params):
+    """Call the wiki API with a user-agent and return parsed JSON."""
     query = urlencode(params)
     url = f"{base_url}?{query}"
     request = Request(
@@ -126,6 +128,7 @@ def fetch_json(base_url, params):
 
 
 def populate_rooms():
+    """Fetch all room pages and persist extracted records."""
     print("Fetching room list from Blue Prince Wiki...")
     data = fetch_json(BASE_URL, QUERY_PARAMS)
     rooms = [

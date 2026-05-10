@@ -1,3 +1,5 @@
+"""Database helpers for schema setup and CRUD operations."""
+
 import sqlite3
 from pathlib import Path
 
@@ -62,6 +64,7 @@ def initialize_db():
 # TODO: Types table id's jumps from the IGNORE so id list is non contiguous
 # Save room information to the database, including handling many-to-many relationship with types
 def save_rooms_to_db(room_info):
+    """Save rooms and type mappings into normalized tables."""
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
         """INSERT OR REPLACE INTO rooms
@@ -96,6 +99,7 @@ def save_rooms_to_db(room_info):
 
 
 def save_to_db(table, data):
+    """Insert a row into a table and return the saved row id."""
     conn = sqlite3.connect(DB_PATH)
     columns = ", ".join(data.keys())
     placeholders = ", ".join("?" * len(data))
@@ -110,6 +114,7 @@ def save_to_db(table, data):
 
 
 def query_db(query, params=()):
+    """Run a read query and return all rows."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.execute(query, params)
     results = cursor.fetchall()

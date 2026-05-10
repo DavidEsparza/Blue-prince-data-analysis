@@ -1,24 +1,20 @@
 from PIL import Image
 import copy
 import streamlit as st
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-sys.path.insert(0, str(Path(__file__).parent))
-import config
+from . import config
 from wrapper import get_rooms
 
 
 def show_run_capture_page(save_callback=None):
+    """Render the run capture UI and persist per-run state in session."""
     from pathlib import Path
 
     MEDIA_PATH = Path(__file__).resolve().parents[3] / "media"
     room_options, room_labels = get_rooms()
     image_list = sorted(
-        MEDIA_PATH.glob("NormalMode*.png"),
-        key=lambda p: int(p.stem.replace("NormalMode(", "").replace(")", "")),
-    )
+        MEDIA_PATH.glob("CursedMode*.png"),
+        key=lambda p: int(p.stem.replace("CursedMode(", "").replace(")", "")),
+    )[:1]
 
     st.session_state.image_list_names = [img.name for img in image_list]
 
@@ -50,12 +46,13 @@ def show_run_capture_page(save_callback=None):
                 "outer_room": room_options[0] if room_options else 0,
                 "current_allowance": 0,
                 "current_stars": 0,
-                "rank_reached": 0,
+                "rank_reached": 1,
             }
             for _ in range(len(image_list))
         ]
 
     def persist_current_run():
+        """Copy current widget values into session state for this run index."""
         run_matrix = st.session_state.list_of_mansions[current_index]
         for row_i in range(5):
             for col_j in range(9):
@@ -76,13 +73,21 @@ def show_run_capture_page(save_callback=None):
                 f"{image.stem}_current_allowance", 0
             ),
             "current_stars": st.session_state.get(f"{image.stem}_current_stars", 0),
-            "rank_reached": st.session_state.get(f"{image.stem}_rank_reached", 0),
+            "rank_reached": st.session_state.get(f"{image.stem}_rank_reached", 1),
         }
 
     current_stats = st.session_state.list_of_run_stats[current_index]
 
     im = Image.open(image)
     st.image(im)
+    rank_reached = st.number_input(
+        "Rank Reached",
+        min_value=1,
+        max_value=10,
+        step=1,
+        value=current_stats.get("rank_reached", 1),
+        key=f"{image.stem}_rank_reached",
+    )
     steps_taken = st.number_input(
         "Steps Taken",
         min_value=0,
@@ -130,14 +135,6 @@ def show_run_capture_page(save_callback=None):
         step=1,
         value=current_stats.get("current_stars", 0),
         key=f"{image.stem}_current_stars",
-    )
-    rank_reached = st.number_input(
-        "Rank Reached",
-        min_value=0,
-        max_value=10,
-        step=1,
-        value=current_stats.get("rank_reached", 0),
-        key=f"{image.stem}_rank_reached",
     )
 
     for i in range(len(mansion)):

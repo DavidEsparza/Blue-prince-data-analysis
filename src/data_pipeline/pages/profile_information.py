@@ -1,14 +1,8 @@
-from PIL import Image
 import streamlit as st
-import pandas as pd
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from wrapper import save_info_to_db
 
 
 def show_profile_page():
+    """Render and save basic player profile inputs."""
     st.subheader("Player Profile Information")
 
     name = st.text_input("Player Name")

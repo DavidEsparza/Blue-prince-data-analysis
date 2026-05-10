@@ -1,4 +1,9 @@
 import streamlit as st
+import sys
+from pathlib import Path
+
+# Allow running this Streamlit file directly from the project root.
+sys.path.insert(0, str(Path(__file__).parent))
 from db_manager import save_to_db
 
 # Initialize session state for page navigation
@@ -14,6 +19,7 @@ st.title("Blue Prince Data Collection")
 
 
 def save_all_data():
+    """Persist profile, day stats, and mansion grids for all captured runs."""
 
     profile = st.session_state.get("profile_data", {})
     if not profile or not profile.get("name"):
@@ -31,13 +37,13 @@ def save_all_data():
         day_data = {
             "player": player_id,
             "day": idx + 1,
-            "steps_taken": int(stats.get("steps_taken", 0) or 0),
-            "items": int(stats.get("items", 0) or 0),
-            "new_rooms": int(stats.get("new_rooms", 0) or 0),
-            "outer_room": int(stats.get("outer_room", 0) or 0),
-            "current_allowance": int(stats.get("current_allowance", 0) or 0),
-            "current_stars": int(stats.get("current_stars", 0) or 0),
-            "rank_reached": int(stats.get("rank_reached", 0) or 0),
+            "steps_taken": int(stats.get("steps_taken", 0)),
+            "items": int(stats.get("items", 0)),
+            "new_rooms": int(stats.get("new_rooms", 0)),
+            "outer_room": int(stats.get("outer_room", 0)),
+            "current_allowance": int(stats.get("current_allowance", 0)),
+            "current_stars": int(stats.get("current_stars", 0)),
+            "rank_reached": int(stats.get("rank_reached", 0)),
         }
         day_id = save_to_db("days", day_data)
 
