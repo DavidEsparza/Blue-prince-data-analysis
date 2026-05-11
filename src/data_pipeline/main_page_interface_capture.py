@@ -1,9 +1,4 @@
 import streamlit as st
-import sys
-from pathlib import Path
-
-# Allow running this Streamlit file directly from the project root.
-sys.path.insert(0, str(Path(__file__).parent))
 from db_manager import save_to_db
 
 # Initialize session state for page navigation
@@ -55,7 +50,7 @@ def save_all_data():
                     if room_value <= 0:
                         continue
                     save_to_db(
-                        "mansion",
+                        "mansions",
                         {
                             "day": day_id,
                             "room": room_value,

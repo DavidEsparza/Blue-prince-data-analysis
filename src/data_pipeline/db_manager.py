@@ -47,8 +47,8 @@ def initialize_db():
                     current_stars INTEGER,
                     rank_reached INTEGER,
                     FOREIGN KEY(outer_room) REFERENCES rooms(number),
-                    FOREIGN KEY(player) REFERENCES players(name))""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS mansion
+                    FOREIGN KEY(player) REFERENCES players(id))""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS mansions
                     (
                     day INTEGER,
                     room INTEGER,

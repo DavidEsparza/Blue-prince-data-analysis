@@ -18,7 +18,28 @@ A Python-based data pipeline and analytical engine for the indie game Blue Princ
 	pip install -r requirements.txt
 	```
 
-4. Run the collector:
+4. Run the manual data collection app:
 	```bash
-	python src/blue-prince-data-pipeline/run_collector.py
+	cd src/data_pipeline
+	streamlit run main_page_interface_capture.py
+	```
+
+This launches the main Streamlit page for manual data collection.
+
+You can also run it from the project root:
+	```bash
+	streamlit run src/data_pipeline/main_page_interface_capture.py
+	```
+
+# Run Analysis Script
+To run `ppp.py` without import errors, use one of these options:
+
+1. From the project root:
+	```bash
+	PYTHONPATH=src python -m data_analysis.ppp
+	```
+
+2. From `src/data_analysis`:
+	```bash
+	PYTHONPATH=.. python ppp.py
 	```
