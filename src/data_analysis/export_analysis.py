@@ -142,7 +142,7 @@ def save_outer_room_stats(df, file_name="outer_room_stats.json"):
         .sort_values(by="count", ascending=False)
         .reset_index()
     )
-    json_output = outer_room_statistics.to_dict(orient="records")
+    json_output = outer_room_statistics.round(2).to_dict(orient="records")
     with open(OUTPUT_DIR / file_name, "w", encoding="utf-8") as f:
         json.dump(json_output, f, indent=2, ensure_ascii=False, sort_keys=True)
 
@@ -164,10 +164,6 @@ def save_shape_placement(df, file_name="room_shape_distribution.json"):
 
     with open(OUTPUT_DIR / file_name, "w", encoding="utf-8") as f:
         json.dump(shape_distibution, f, indent=2, ensure_ascii=False, sort_keys=True)
-
-    # json_output = shape_distribution.to_dict(orient="records")
-    # with open(OUTPUT_DIR / file_name, "w", encoding="utf-8") as f:
-    #     json.dump(json_output, f, indent=2, ensure_ascii=False, sort_keys=True)
 
 
 def save_stats_on_tomorrow_rooms(df, file_name="stats_on_tomorrow_rooms.json"):
@@ -202,7 +198,101 @@ def save_stats_on_tomorrow_rooms(df, file_name="stats_on_tomorrow_rooms.json"):
     tomorrow_room_impact.to_json(OUTPUT_DIR / file_name)
     with open(OUTPUT_DIR / file_name, "w", encoding="utf-8") as f:
         json.dump(
-            tomorrow_room_impact.to_dict(),
+            tomorrow_room_impact.round(2).to_dict(),
+            f,
+            indent=2,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+
+
+def save_shelter_stats(df, file_name="shelter_stats.json"):
+    """Generate JSON with shelter stats data."""
+
+    aggregated_shelter_df = (
+        df[
+            (df["type"] == "red room")
+            & (df["outer_room"] == "Shelter")
+            & ~(df["room_name"] == "Aquarium")
+        ]
+        .groupby("day")
+        .agg(
+            count=("room_name", "size"),
+            steps_taken=("steps_taken", "first"),
+            rank_reached=("rank_reached", "first"),
+            items=("items", "first"),
+            rooms_in_mansion=("rooms_in_mansion", "first"),
+        )
+    )
+    aggregated_no_shelter_df = (
+        df[
+            (df["type"] == "red room")
+            & ~(df["outer_room"] == "Shelter")
+            & ~(df["room_name"] == "Aquarium")
+        ]
+        .groupby("day")
+        .agg(
+            count=("room_name", "size"),
+            steps_taken=("steps_taken", "first"),
+            rank_reached=("rank_reached", "first"),
+            items=("items", "first"),
+            rooms_in_mansion=("rooms_in_mansion", "first"),
+        )
+    )
+    shelter_stats = {}
+
+    shelter_stats_by_red_room_count = (
+        aggregated_shelter_df[
+            (aggregated_shelter_df["count"] >= 4)
+            & (aggregated_shelter_df["count"] <= 7)
+        ]
+        .groupby("count")
+        .mean()
+        .reset_index()
+    )
+
+    no_shelter_stats_by_red_room_count = (
+        aggregated_no_shelter_df[
+            (aggregated_no_shelter_df["count"] >= 4)
+            & (aggregated_no_shelter_df["count"] <= 7)
+        ]
+        .groupby("count")
+        .mean()
+        .reset_index()
+    )
+
+    shelter_stats["with_shelter"] = shelter_stats_by_red_room_count.round(2).to_dict(
+        orient="records"
+    )
+    shelter_stats["without_shelter"] = no_shelter_stats_by_red_room_count.round(
+        2
+    ).to_dict(orient="records")
+
+    with open(OUTPUT_DIR / file_name, "w", encoding="utf-8") as f:
+        json.dump(shelter_stats, f, indent=2, ensure_ascii=False, sort_keys=True)
+
+
+def save_dead_ends_before_rank_4(df, file_name="dead_ends_before_rank_3.json"):
+    """Calculate the number of dead ends before reaching rank 4."""
+    dead_ends_before_rank_4 = (
+        df[(df["shape"] == "Dead End") & (df["pos_y"] >= 5)]
+        .groupby("day")
+        .size()
+        .reset_index(name="count")
+    )
+    dead_ends_before_rank_4["group_id"] = dead_ends_before_rank_4.index // 10
+    dead_ends_before_rank_4_grouped = (
+        dead_ends_before_rank_4.groupby("group_id")
+        .agg(
+            mean=("count", "mean"),
+            range=("count", lambda x: f"{x.index[0] + 1}-{x.index[-1] + 1}"),
+        )
+        .reset_index(drop=True)
+    )
+
+    with open(OUTPUT_DIR / file_name, "w", encoding="utf-8") as f:
+        json.dump(
+            dead_ends_before_rank_4_grouped.round(2).to_dict(orient="records"),
             f,
             indent=2,
             ensure_ascii=False,
@@ -234,7 +324,11 @@ def main():
         df_without_types["day"].le(goal_reached_day)
     ]
 
-    # ------------------------------------------------------------------------------
+    # How many times dead ends where drafted before rank 3
+    save_dead_ends_before_rank_4(df_without_types)
+
+    #  Stats when shelter is picked vs when no shelter is picked
+    save_shelter_stats(df)
 
     # How often was a room with shaped placed in each location of the mansion before reaching rank 10
     save_shape_placement(
