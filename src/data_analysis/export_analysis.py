@@ -1,8 +1,8 @@
+import argparse
+import sys
 from fetch_data import get_player_runs_data, get_all_rooms_data
 import pandas as pd
-import numpy as np
-from pathlib import Path
-import json
+from save_to_json import OUTPUT_DIR, write_json, dataframe_to_json_payload
 
 ROOM_COLORS = [
     "bedroom",
@@ -19,7 +19,72 @@ PRELOADED_ROOMS = [
     "Entrance Hall",
 ]
 
-OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data"
+EXPORT_DETAILS = {
+    "dead_ends_before_rank_4": {
+        "label": "Dead Ends Before Rank 4",
+        "description": "Grouped dead-end counts in deeper rows before progressing.",
+    },
+    "shelter_stats": {
+        "label": "Shelter Comparison",
+        "description": "Red-room performance with and without Shelter.",
+    },
+    "pre_win_shape_placement": {
+        "label": "Pre-Win Shape Placement",
+        "description": "Room-shape placement heatmap before rank 10.",
+    },
+    "shape_placement": {
+        "label": "Shape Placement",
+        "description": "Room-shape placement heatmap across all runs.",
+    },
+    "outer_room_stats": {
+        "label": "Outer Room Stats",
+        "description": "Performance averages grouped by outer room across all runs.",
+    },
+    "pre_win_outer_room_stats": {
+        "label": "Pre-Win Outer Room Stats",
+        "description": "Performance averages grouped by outer room before rank 10.",
+    },
+    "room_count": {
+        "label": "Room Quantity",
+        "description": "Draft frequency and metadata for all non-preloaded rooms.",
+    },
+    "pre_win_room_count": {
+        "label": "Pre-Win Room Quantity",
+        "description": "Room frequency before rank 10, including max rank reached.",
+    },
+    "full_mansion_room_count": {
+        "label": "Full Mansion Room Quantity",
+        "description": "Room frequency only for complete 45-room mansions.",
+    },
+    "pre_win_color_progression": {
+        "label": "Pre-Win Color Progression",
+        "description": "Cumulative room-color picks before rank 10.",
+    },
+    "color_progression": {
+        "label": "Color Progression",
+        "description": "Cumulative room-color picks across all runs.",
+    },
+    "pre_win_color_progression_without_aquarium": {
+        "label": "Pre-Win Color Progression Without Aquarium",
+        "description": "Pre-rank-10 cumulative colors excluding Aquarium.",
+    },
+    "color_progression_without_aquarium": {
+        "label": "Color Progression Without Aquarium",
+        "description": "All-run cumulative colors excluding Aquarium.",
+    },
+    "pre_win_room_distribution": {
+        "label": "Pre-Win Room Distribution",
+        "description": "Room-color placement heatmap before rank 10.",
+    },
+    "room_distribution": {
+        "label": "Room Distribution",
+        "description": "Room-color placement heatmap across all runs.",
+    },
+    "tomorrow_room_stats": {
+        "label": "Tomorrow Room Impact",
+        "description": "Next-day performance grouped by tomorrow-room count.",
+    },
+}
 
 
 def normalize_run_room_data(runs, rooms):
@@ -67,7 +132,17 @@ def normalize_run_room_data(runs, rooms):
 def save_room_distribution(
     df, df_without_types, file_name="room_color_distribution.json"
 ):
-    """Generate JSON files with room distribution data."""
+    """Save room placement density by color of rooms.
+
+    Builds a position heatmap over the mansion grid using ``pos_x`` and ``pos_y``.
+    The output contains one key named ``all`` with counts for all room regardless of type,
+    plus one key per room color from ``ROOM_COLORS``.
+
+    Args:
+        df: Exploded run/room DataFrame that includes a ``type`` column.
+        df_without_types: Room-placement DataFrame without type explosion.
+        file_name: Target JSON filename in OUTPUT_DIR.
+    """
     color_distibution = {}
 
     color_counts = (
@@ -85,45 +160,70 @@ def save_room_distribution(
         )
         color_distibution[color] = color_counts.to_dict(orient="records")
 
-    pd.Series(color_distibution).to_json(OUTPUT_DIR / file_name)
-    with open(OUTPUT_DIR / file_name, "w", encoding="utf-8") as f:
-        json.dump(color_distibution, f, indent=2, ensure_ascii=False, sort_keys=True)
+    write_json(file_name, color_distibution)
 
 
 def save_color_progression_by_day(df, file_name="cumulative_room_quantity_by_day.json"):
-    """Generate JSON files with room cumulative quantity by day data."""
+    """Save cumulative room-color picks over time.
+
+    Aggregates daily counts by room ``type``, keeps only ``ROOM_COLORS`` in a fixed
+    order, then computes a cumulative sum across days. The JSON payload maps each
+    color to a list of cumulative totals aligned by day index.
+
+    Args:
+        df: DataFrame containing at least ``day`` and ``type`` columns.
+        file_name: Target JSON filename in OUTPUT_DIR.
+    """
     daily_counts = df.groupby(["day", "type"]).size().reset_index(name="count")
     type_pivot = daily_counts.pivot(index="day", columns="type", values="count")
     type_pivot = type_pivot.reindex(columns=ROOM_COLORS).fillna(0)
     df_cumulative_types = type_pivot.cumsum()
     df_cumulative_types = df_cumulative_types.astype(int)
-    json_output = df_cumulative_types.to_dict(orient="list")
-    with open(OUTPUT_DIR / file_name, "w", encoding="utf-8") as f:
-        json.dump(json_output, f, indent=2, ensure_ascii=False, sort_keys=True)
+    write_json(file_name, dataframe_to_json_payload(df_cumulative_types, orient="list"))
 
 
 def save_room_count(df, max_rank=False, file_name="room_quantity.json"):
-    """Generate JSON with room quantity data."""
+    """Save room usage frequency and static room metadata.
+
+    Excludes preloaded rooms and groups by ``room_name`` to compute draft count.
+    Includes representative room metadata (cost, rarity, shape) and the maximum
+    rank reached among runs where each room appears when requested.
+
+    Args:
+        df: DataFrame with room-level rows and room metadata columns.
+        max_rank: Whether to include ``max_rank_reached`` in the output.
+        file_name: Target JSON filename in OUTPUT_DIR.
+    """
+    agg_map = {
+        "count": ("room_name", "size"),
+        "cost": ("gem_cost", "first"),
+        "rarity": ("rarity", "first"),
+        "shape": ("shape", "first"),
+    }
+    if max_rank:
+        agg_map["max_rank_reached"] = ("rank_reached", "max")
+
     room_counts = (
         df[~df["room_name"].isin(PRELOADED_ROOMS)]
         .groupby("room_name")
-        .agg(
-            count=("room_name", "size"),
-            cost=("gem_cost", "first"),
-            rarity=("rarity", "first"),
-            shape=("shape", "first"),
-            max_rank_reached=("rank_reached", "max"),
-        )
+        .agg(**agg_map)
         .sort_values(by="count", ascending=False)
         .reset_index()
     )
-    json_output = room_counts.to_dict(orient="records")
-    with open(OUTPUT_DIR / file_name, "w", encoding="utf-8") as f:
-        json.dump(json_output, f, indent=2, ensure_ascii=False, sort_keys=True)
+    write_json(file_name, dataframe_to_json_payload(room_counts, orient="records"))
 
 
 def save_outer_room_stats(df, file_name="outer_room_stats.json"):
-    """Generate JSON with outer room stats data."""
+    """Save run performance grouped by chosen outer room.
+
+    First collapses rows to one record per day, then groups by ``outer_room`` to
+    compute how frequently each outer room appears and average performance metrics
+    (items, rank reached, mansion size).
+
+    Args:
+        df: DataFrame containing daily run information and ``outer_room``.
+        file_name: Target JSON filename in OUTPUT_DIR.
+    """
     outer_room_statistics = (
         df.groupby("day")
         .agg(
@@ -142,13 +242,27 @@ def save_outer_room_stats(df, file_name="outer_room_stats.json"):
         .sort_values(by="count", ascending=False)
         .reset_index()
     )
-    json_output = outer_room_statistics.round(2).to_dict(orient="records")
-    with open(OUTPUT_DIR / file_name, "w", encoding="utf-8") as f:
-        json.dump(json_output, f, indent=2, ensure_ascii=False, sort_keys=True)
+    write_json(
+        file_name,
+        dataframe_to_json_payload(
+            outer_room_statistics,
+            orient="records",
+            round_digits=2,
+        ),
+    )
 
 
 def save_shape_placement(df, file_name="room_shape_distribution.json"):
-    """Generate JSON with room distribution by shapedata."""
+    """Save room placement density separated by room shape.
+
+    For each non-``Special`` shape, counts how often that shape is placed at each
+    mansion coordinate (``pos_x``, ``pos_y``). Output is a dictionary keyed by
+    shape with ``[{pos_x, pos_y, count}, ...]`` entries.
+
+    Args:
+        df: DataFrame containing ``shape``, ``pos_x``, and ``pos_y``.
+        file_name: Target JSON filename in OUTPUT_DIR.
+    """
     shape_types = df["shape"].unique()
     shape_distibution = {}
     for shape_type in shape_types:
@@ -162,13 +276,21 @@ def save_shape_placement(df, file_name="room_shape_distribution.json"):
         )
         shape_distibution[shape_type] = shape_counts.to_dict(orient="records")
 
-    with open(OUTPUT_DIR / file_name, "w", encoding="utf-8") as f:
-        json.dump(shape_distibution, f, indent=2, ensure_ascii=False, sort_keys=True)
+    write_json(file_name, shape_distibution)
 
 
 def save_stats_on_tomorrow_rooms(df, file_name="stats_on_tomorrow_rooms.json"):
-    """Generate JSON with stats on tomorrow rooms data."""
-    # Format data for stats on tomorrow rooms, excluding aquarim since it does not affect the next day
+    """Save next-day performance impact by number of "tomorrow" rooms.
+
+    Counts how many ``tomorrow`` room types were drafted on each day (excluding
+    Aquariums), then shifts performance metrics by one day so the grouped
+    averages represent next-day outcomes conditioned on today's tomorrow-room count.
+
+    Args:
+        df: DataFrame with ``day``, ``type``, and performance metric columns.
+        file_name: Target JSON filename in OUTPUT_DIR.
+    """
+
     daily_stats_shifted = (
         df[(df["room_name"] != "Aquarium")]
         .groupby("day")
@@ -195,20 +317,23 @@ def save_stats_on_tomorrow_rooms(df, file_name="stats_on_tomorrow_rooms.json"):
         .mean()
         .drop("day", axis=1)
     )
-    tomorrow_room_impact.to_json(OUTPUT_DIR / file_name)
-    with open(OUTPUT_DIR / file_name, "w", encoding="utf-8") as f:
-        json.dump(
-            tomorrow_room_impact.round(2).to_dict(),
-            f,
-            indent=2,
-            ensure_ascii=False,
-            sort_keys=True,
-        )
+    write_json(
+        file_name, dataframe_to_json_payload(tomorrow_room_impact, round_digits=2)
+    )
 
 
 def save_shelter_stats(df, file_name="shelter_stats.json"):
-    """Generate JSON with shelter stats data."""
+    """Compare red-room performance with and without selecting Shelter.
 
+    Builds two cohorts (outer room is Shelter vs not Shelter), counts drafted red
+    rooms per day (excluding Aquarium), and summarizes average outcomes for days
+    with 4 to 7 drafted red rooms. Saves two lists under ``with_shelter`` and
+    ``without_shelter``.
+
+    Args:
+        df: DataFrame with room type, outer room, and performance columns.
+        file_name: Target JSON filename in OUTPUT_DIR.
+    """
     aggregated_shelter_df = (
         df[
             (df["type"] == "red room")
@@ -268,12 +393,21 @@ def save_shelter_stats(df, file_name="shelter_stats.json"):
         2
     ).to_dict(orient="records")
 
-    with open(OUTPUT_DIR / file_name, "w", encoding="utf-8") as f:
-        json.dump(shelter_stats, f, indent=2, ensure_ascii=False, sort_keys=True)
+    write_json(file_name, shelter_stats)
 
 
 def save_dead_ends_before_rank_4(df, file_name="dead_ends_before_rank_3.json"):
-    """Calculate the number of dead ends before reaching rank 4."""
+    """Save grouped statistics for dead-end drafts in deeper mansion rows.
+
+    Counts per-day drafts of ``Dead End`` shapes in rows ``pos_y >= 5``, then groups
+    every 10 daily observations into batches to report mean count and source index
+    range for each batch.
+
+    Args:
+        df: DataFrame containing ``shape``, ``pos_y``, and ``day``.
+        file_name: Target JSON filename in OUTPUT_DIR.
+    """
+
     dead_ends_before_rank_4 = (
         df[(df["shape"] == "Dead End") & (df["pos_y"] >= 5)]
         .groupby("day")
@@ -290,17 +424,162 @@ def save_dead_ends_before_rank_4(df, file_name="dead_ends_before_rank_3.json"):
         .reset_index(drop=True)
     )
 
-    with open(OUTPUT_DIR / file_name, "w", encoding="utf-8") as f:
-        json.dump(
-            dead_ends_before_rank_4_grouped.round(2).to_dict(orient="records"),
-            f,
-            indent=2,
-            ensure_ascii=False,
-            sort_keys=True,
+    write_json(
+        file_name,
+        dataframe_to_json_payload(
+            dead_ends_before_rank_4_grouped,
+            orient="records",
+            round_digits=2,
+        ),
+    )
+
+
+def build_export_jobs(df, df_without_types, pre_win_df, pre_win_df_without_types):
+    """Build the available export jobs keyed by a user-facing export name."""
+    return {
+        "dead_ends_before_rank_4": lambda: save_dead_ends_before_rank_4(
+            df_without_types
+        ),
+        "shelter_stats": lambda: save_shelter_stats(df),
+        "pre_win_shape_placement": lambda: save_shape_placement(
+            pre_win_df_without_types,
+            file_name="pre_win_room_shape_distribution.json",
+        ),
+        "shape_placement": lambda: save_shape_placement(
+            df_without_types,
+            file_name="room_shape_distribution.json",
+        ),
+        "outer_room_stats": lambda: save_outer_room_stats(df_without_types),
+        "pre_win_outer_room_stats": lambda: save_outer_room_stats(
+            pre_win_df_without_types,
+            file_name="pre_win_outer_room_stats.json",
+        ),
+        "room_count": lambda: save_room_count(
+            df_without_types,
+            max_rank=False,
+            file_name="room_quantity.json",
+        ),
+        "pre_win_room_count": lambda: save_room_count(
+            pre_win_df_without_types,
+            max_rank=True,
+            file_name="pre_win_room_quantity.json",
+        ),
+        "full_mansion_room_count": lambda: save_room_count(
+            df[(df["type"].isin(ROOM_COLORS)) & (df["rooms_in_mansion"] == 45)],
+            max_rank=False,
+            file_name="room_quantity_on_full_mansion.json",
+        ),
+        "pre_win_color_progression": lambda: save_color_progression_by_day(
+            pre_win_df[(pre_win_df["type"].isin(ROOM_COLORS))]
+        ),
+        "color_progression": lambda: save_color_progression_by_day(
+            df[(df["type"].isin(ROOM_COLORS))],
+            "pre_win_cumulative_room_quantity_by_day.json",
+        ),
+        "pre_win_color_progression_without_aquarium": lambda: save_color_progression_by_day(
+            pre_win_df[
+                (pre_win_df["type"].isin(ROOM_COLORS))
+                & ~(pre_win_df["room_name"] == "Aquarium")
+            ],
+            "pre_win_cumulative_room_quantity_by_day_without_aquarium.json",
+        ),
+        "color_progression_without_aquarium": lambda: save_color_progression_by_day(
+            df[(df["type"].isin(ROOM_COLORS)) & ~(df["room_name"] == "Aquarium")],
+            "cumulative_room_quantity_by_day_without_aquarium.json",
+        ),
+        "pre_win_room_distribution": lambda: save_room_distribution(
+            pre_win_df,
+            pre_win_df_without_types,
+            file_name="pre_win_room_color_distribution.json",
+        ),
+        "room_distribution": lambda: save_room_distribution(df, df_without_types),
+        "tomorrow_room_stats": lambda: save_stats_on_tomorrow_rooms(df),
+    }
+
+
+def parse_args():
+    """Parse CLI arguments for export selection."""
+    parser = argparse.ArgumentParser(
+        description="Generate one or more Blue Prince analysis exports."
+    )
+    parser.add_argument(
+        "--exports",
+        nargs="+",
+        metavar="EXPORT_NAME",
+        help="Export names to generate, or 'all' to generate every export.",
+    )
+    parser.add_argument(
+        "--list-exports",
+        action="store_true",
+        help="Print the available export names and exit.",
+    )
+    return parser.parse_args()
+
+
+def display_export_options(export_jobs):
+    """Print available exports with labels and descriptions."""
+    for index, export_name in enumerate(export_jobs, start=1):
+        export_detail = EXPORT_DETAILS[export_name]
+        print(
+            f"{index}. {export_detail['label']} ({export_name}) - "
+            f"{export_detail['description']}"
         )
+    print("all. Generate every export")
+
+
+def normalize_export_selection(selection, export_jobs):
+    """Normalize requested export names and validate them."""
+    if not selection:
+        return []
+
+    export_names = list(export_jobs.keys())
+    requested_exports = []
+    for item in selection:
+        requested_exports.extend(part.strip() for part in item.split(","))
+
+    requested_exports = [item for item in requested_exports if item]
+    if not requested_exports or "all" in requested_exports:
+        return export_names
+
+    normalized_exports = []
+    for export_name in requested_exports:
+        if export_name.isdigit():
+            export_index = int(export_name) - 1
+            if 0 <= export_index < len(export_names):
+                normalized_exports.append(export_names[export_index])
+                continue
+        normalized_exports.append(export_name)
+
+    invalid_exports = [name for name in normalized_exports if name not in export_jobs]
+    if invalid_exports:
+        available = ", ".join(export_jobs.keys())
+        invalid = ", ".join(invalid_exports)
+        raise ValueError(
+            f"Unknown export selection: {invalid}. Available exports: {available}"
+        )
+
+    return normalized_exports
+
+
+def prompt_for_exports(export_jobs):
+    """Ask the user which exports to generate when running interactively."""
+    print("Available exports:")
+    display_export_options(export_jobs)
+
+    selection = input(
+        "Enter one or more numbers or export names separated by commas, or 'all': "
+    )
+    return normalize_export_selection([selection], export_jobs)
+
+
+def run_export_jobs(selected_exports, export_jobs):
+    """Run the selected export jobs in order."""
+    for export_name in selected_exports:
+        export_jobs[export_name]()
 
 
 def main():
+    args = parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -324,73 +603,23 @@ def main():
         df_without_types["day"].le(goal_reached_day)
     ]
 
-    # How many times dead ends where drafted before rank 3
-    save_dead_ends_before_rank_4(df_without_types)
-
-    #  Stats when shelter is picked vs when no shelter is picked
-    save_shelter_stats(df)
-
-    # How often was a room with shaped placed in each location of the mansion before reaching rank 10
-    save_shape_placement(
-        pre_win_df_without_types, file_name="pre_win_room_shape_distribution.json"
-    )
-    # How often was a room with shaped placed in each location of the mansion
-    save_shape_placement(df_without_types, file_name="room_shape_distribution.json")
-
-    # Statistics on performance based on outer room
-    save_outer_room_stats(df_without_types)
-    # Statistics on performance based on outer room before reaching rank 10
-    save_outer_room_stats(
-        pre_win_df_without_types, file_name="pre_win_outer_room_stats.json"
+    export_jobs = build_export_jobs(
+        df, df_without_types, pre_win_df, pre_win_df_without_types
     )
 
-    # How many times a room was drafted in the mansion
-    save_room_count(df_without_types, max_rank=False, file_name="room_quantity.json")
-    # How many times a room was drafted in the mansion before reaching rank 10
-    save_room_count(
-        pre_win_df_without_types, max_rank=True, file_name="pre_win_room_quantity.json"
-    )
-    # How many times a room was drafted in a full mansion
-    save_room_count(
-        df[(df["type"].isin(ROOM_COLORS)) & (df["rooms_in_mansion"] == 45)],
-        max_rank=False,
-        file_name="room_quantity_on_full_mansion.json",
-    )
+    if args.list_exports:
+        print("Available exports:")
+        display_export_options(export_jobs)
+        return
 
-    # How many times a color has been picked over time before reaching rank 10
-    save_color_progression_by_day(pre_win_df[(pre_win_df["type"].isin(ROOM_COLORS))])
-    # How many times a color has been picked over time
-    save_color_progression_by_day(
-        df[(df["type"].isin(ROOM_COLORS))],
-        "pre_win_cumulative_room_quantity_by_day.json",
-    )
+    if args.exports:
+        selected_exports = normalize_export_selection(args.exports, export_jobs)
+    elif sys.stdin.isatty():
+        selected_exports = prompt_for_exports(export_jobs)
+    else:
+        selected_exports = list(export_jobs.keys())
 
-    # How many times a color has been picked over time before reaching rank 10 excluding aquarium
-    save_color_progression_by_day(
-        pre_win_df[
-            (pre_win_df["type"].isin(ROOM_COLORS))
-            & ~(pre_win_df["room_name"] == "Aquarium")
-        ],
-        "pre_win_cumulative_room_quantity_by_day_without_aquarium.json",
-    )
-
-    # How many times a color has been picked over time excluding aquarium
-    save_color_progression_by_day(
-        df[(df["type"].isin(ROOM_COLORS)) & ~(df["room_name"] == "Aquarium")],
-        "cumulative_room_quantity_by_day_without_aquarium.json",
-    )
-
-    # How often was a room type placed in each location of the mansion before reaching rank 10
-    save_room_distribution(
-        pre_win_df,
-        pre_win_df_without_types,
-        file_name="pre_win_room_color_distribution.json",
-    )
-    # How often was a room type placed in each location of the mansion
-    save_room_distribution(df, df_without_types)
-
-    # Statisctics on performance the next day based on tomorrow rooms of such day
-    save_stats_on_tomorrow_rooms(df)
+    run_export_jobs(selected_exports, export_jobs)
 
 
 if __name__ == "__main__":
