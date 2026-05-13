@@ -176,7 +176,8 @@ def save_color_progression_by_day(df, file_name="cumulative_room_quantity_by_day
     """
     daily_counts = df.groupby(["day", "type"]).size().reset_index(name="count")
     type_pivot = daily_counts.pivot(index="day", columns="type", values="count")
-    type_pivot = type_pivot.reindex(columns=ROOM_COLORS).fillna(0)
+    full_day_range = pd.RangeIndex(df["day"].min(), df["day"].max() + 1)
+    type_pivot = type_pivot.reindex(index=full_day_range, columns=ROOM_COLORS).fillna(0)
     df_cumulative_types = type_pivot.cumsum()
     df_cumulative_types = df_cumulative_types.astype(int)
     write_json(file_name, dataframe_to_json_payload(df_cumulative_types, orient="list"))
@@ -399,27 +400,38 @@ def save_shelter_stats(df, file_name="shelter_stats.json"):
 def save_dead_ends_before_rank_4(df, file_name="dead_ends_before_rank_3.json"):
     """Save grouped statistics for dead-end drafts in deeper mansion rows.
 
-    Counts per-day drafts of ``Dead End`` shapes in rows ``pos_y >= 5``, then groups
-    every 10 daily observations into batches to report mean count and source index
-    range for each batch.
+    Counts per-day drafts of ``Dead End`` shapes in rows ``pos_y >= 5``, fills in
+    missing days with zero drafts, then groups consecutive 10-day windows to report
+    mean count and actual day ranges for each batch.
 
     Args:
         df: DataFrame containing ``shape``, ``pos_y``, and ``day``.
         file_name: Target JSON filename in OUTPUT_DIR.
     """
 
-    dead_ends_before_rank_4 = (
+    dead_ends_by_day = (
         df[(df["shape"] == "Dead End") & (df["pos_y"] >= 5)]
         .groupby("day")
         .size()
         .reset_index(name="count")
     )
-    dead_ends_before_rank_4["group_id"] = dead_ends_before_rank_4.index // 10
+
+    full_day_range = pd.RangeIndex(df["day"].min(), df["day"].max() + 1)
+    dead_ends_before_rank_4 = (
+        dead_ends_by_day.set_index("day")
+        .reindex(full_day_range, fill_value=0)
+        .rename_axis("day")
+        .reset_index()
+    )
+    dead_ends_before_rank_4["group_id"] = (
+        dead_ends_before_rank_4["day"] - dead_ends_before_rank_4["day"].min()
+    ) // 10
+
     dead_ends_before_rank_4_grouped = (
         dead_ends_before_rank_4.groupby("group_id")
         .agg(
             mean=("count", "mean"),
-            range=("count", lambda x: f"{x.index[0] + 1}-{x.index[-1] + 1}"),
+            range=("day", lambda days: f"{days.min()}-{days.max()}"),
         )
         .reset_index(drop=True)
     )
@@ -470,11 +482,12 @@ def build_export_jobs(df, df_without_types, pre_win_df, pre_win_df_without_types
             file_name="room_quantity_on_full_mansion.json",
         ),
         "pre_win_color_progression": lambda: save_color_progression_by_day(
-            pre_win_df[(pre_win_df["type"].isin(ROOM_COLORS))]
+            pre_win_df[(pre_win_df["type"].isin(ROOM_COLORS))],
+            "pre_win_cumulative_room_quantity_by_day.json",
         ),
         "color_progression": lambda: save_color_progression_by_day(
             df[(df["type"].isin(ROOM_COLORS))],
-            "pre_win_cumulative_room_quantity_by_day.json",
+            "cumulative_room_quantity_by_day.json",
         ),
         "pre_win_color_progression_without_aquarium": lambda: save_color_progression_by_day(
             pre_win_df[
